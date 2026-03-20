@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 2,
+    "address": 3,
     "nonce": 0,
     "mux_id": 0
   },
@@ -38,20 +38,65 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "Answers"
+                            "symbol": "Participants"
+                          },
+                          {
+                            "u32": 0
                           }
                         ]
                       },
                       "val": {
+                        "vec": []
+                      }
+                    },
+                    {
+                      "key": {
                         "vec": [
                           {
-                            "string": "4"
+                            "symbol": "Quiz"
                           },
                           {
-                            "string": "Paris"
+                            "u32": 0
+                          }
+                        ]
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "answers"
+                            },
+                            "val": {
+                              "vec": [
+                                {
+                                  "string": "4"
+                                },
+                                {
+                                  "string": "Paris"
+                                },
+                                {
+                                  "string": "Blue"
+                                }
+                              ]
+                            }
                           },
                           {
-                            "string": "Blue"
+                            "key": {
+                              "symbol": "questions"
+                            },
+                            "val": {
+                              "vec": [
+                                {
+                                  "string": "What is 2 + 2?"
+                                },
+                                {
+                                  "string": "What is the capital of France?"
+                                },
+                                {
+                                  "string": "What color is the sky?"
+                                }
+                              ]
+                            }
                           }
                         ]
                       }
@@ -60,46 +105,12 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "Initialized"
+                            "symbol": "QuizCounter"
                           }
                         ]
                       },
                       "val": {
-                        "bool": true
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "Questions"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "vec": [
-                          {
-                            "string": "What is 2 + 2?"
-                          },
-                          {
-                            "string": "What is the capital of France?"
-                          },
-                          {
-                            "string": "What color is the sky?"
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "Scores"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "map": []
+                        "u32": 1
                       }
                     }
                   ]

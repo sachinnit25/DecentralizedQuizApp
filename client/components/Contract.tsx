@@ -2,10 +2,14 @@
 
 import { useState, useCallback, useEffect } from "react";
 import {
-  submitAnswer,
+  createQuiz,
+  answerQuestion,
   getScore,
   getQuestion,
   getTotalQuestions,
+  getAllQuizIds,
+  getQuizQuestions,
+  getLeaderboard,
   CONTRACT_ADDRESS,
 } from "@/hooks/contract";
 import { AnimatedCard } from "@/components/ui/animated-card";
@@ -74,34 +78,44 @@ function QuestionIcon() {
   );
 }
 
-// ── Method Signature ─────────────────────────────────────────
-
-function MethodSignature({
-  name,
-  params,
-  returns,
-  color,
-}: {
-  name: string;
-  params: string;
-  returns?: string;
-  color: string;
-}) {
+function PlusIcon() {
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-white/[0.04] bg-white/[0.02] px-4 py-3 font-mono text-sm">
-      <span style={{ color }} className="font-semibold">fn</span>
-      <span className="text-white/70">{name}</span>
-      <span className="text-white/20 text-xs">{params}</span>
-      {returns && (
-        <span className="ml-auto text-white/15 text-[10px]">{returns}</span>
-      )}
-    </div>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="8" y1="6" x2="21" y2="6" />
+      <line x1="8" y1="12" x2="21" y2="12" />
+      <line x1="8" y1="18" x2="21" y2="18" />
+      <line x1="3" y1="6" x2="3.01" y2="6" />
+      <line x1="3" y1="12" x2="3.01" y2="12" />
+      <line x1="3" y1="18" x2="3.01" y2="18" />
+    </svg>
+  );
+}
+
+function UserIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
   );
 }
 
 // ── Main Component ───────────────────────────────────────────
 
-type Tab = "answer" | "score";
+type Tab = "browse" | "answer" | "create" | "leaderboard";
+
+interface Quiz {
+  id: number;
+  questions: string[];
+}
 
 interface ContractUIProps {
   walletAddress: string | null;
@@ -110,82 +124,114 @@ interface ContractUIProps {
 }
 
 export default function ContractUI({ walletAddress, onConnect, isConnecting }: ContractUIProps) {
-  const [activeTab, setActiveTab] = useState<Tab>("answer");
+  const [activeTab, setActiveTab] = useState<Tab>("browse");
   const [error, setError] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
 
-  // Quiz state
+  // Quiz list state
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [selectedQuizId, setSelectedQuizId] = useState<number | null>(null);
+  const [isLoadingQuizzes, setIsLoadingQuizzes] = useState(false);
+
+  // Answer state
   const [totalQuestions, setTotalQuestions] = useState<number>(0);
   const [currentQuestion, setCurrentQuestion] = useState<string>("");
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [answer, setAnswer] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [userScore, setUserScore] = useState<number>(0);
 
-  // Score state
-  const [scoreAddress, setScoreAddress] = useState<string>("");
-  const [score, setScore] = useState<number | null>(null);
-  const [isLoadingScore, setIsLoadingScore] = useState(false);
-  const [userScore, setUserScore] = useState<number | null>(null);
+  // Create quiz state
+  const [questions, setQuestions] = useState<string[]>([""]);
+  const [answers, setAnswers] = useState<string[]>([""]);
+  const [isCreating, setIsCreating] = useState(false);
+
+  // Leaderboard state
+  const [leaderboard, setLeaderboard] = useState<Array<{ user: string; score: number }>>([]);
 
   const truncate = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
-  // Load quiz data on mount
+  // Load quizzes on mount
   useEffect(() => {
-    loadQuizData();
+    loadQuizzes();
   }, []);
 
-  // Load user's score when wallet connects
+  // Load user's score when wallet connects and quiz is selected
   useEffect(() => {
-    if (walletAddress) {
-      loadUserScore(walletAddress);
+    if (walletAddress && selectedQuizId !== null) {
+      loadUserScore();
     }
-  }, [walletAddress]);
+  }, [walletAddress, selectedQuizId]);
 
-  const loadQuizData = async () => {
+  const loadQuizzes = async () => {
+    setIsLoadingQuizzes(true);
     try {
-      const total = await getTotalQuestions();
-      setTotalQuestions(total);
-      if (total > 0) {
-        const q = await getQuestion(0);
-        setCurrentQuestion(typeof q === "string" ? q : "");
+      const ids = await getAllQuizIds();
+      const loadedQuizzes: Quiz[] = [];
+      for (const id of ids) {
+        const qs = await getQuizQuestions(id);
+        loadedQuizzes.push({ id, questions: qs });
       }
+      setQuizzes(loadedQuizzes);
     } catch (err) {
-      // Quiz might not be initialized yet
-      console.error("Quiz not initialized:", err);
+      console.error("Failed to load quizzes:", err);
+    } finally {
+      setIsLoadingQuizzes(false);
     }
   };
 
-  const loadUserScore = async (address: string) => {
+  const loadQuizData = async (quizId: number) => {
     try {
-      const s = await getScore(address);
-      setUserScore(s);
+      const total = await getTotalQuestions(quizId);
+      setTotalQuestions(total);
+      setCurrentIndex(0);
+      if (total > 0) {
+        const q = await getQuestion(quizId, 0);
+        setCurrentQuestion(q || "");
+      }
+    } catch (err) {
+      console.error("Failed to load quiz:", err);
+    }
+  };
+
+  const loadUserScore = async () => {
+    if (!walletAddress || selectedQuizId === null) return;
+    try {
+      const score = await getScore(walletAddress, selectedQuizId);
+      setUserScore(score);
     } catch {
       setUserScore(0);
     }
   };
 
+  const handleSelectQuiz = async (quizId: number) => {
+    setSelectedQuizId(quizId);
+    await loadQuizData(quizId);
+    setActiveTab("answer");
+  };
+
   const handleSubmitAnswer = useCallback(async () => {
     if (!walletAddress) return setError("Connect wallet first");
     if (!answer.trim()) return setError("Enter an answer");
-    if (totalQuestions === 0) return setError("Quiz not initialized");
+    if (selectedQuizId === null) return setError("Select a quiz first");
 
     setError(null);
     setIsSubmitting(true);
     setTxStatus("Awaiting signature...");
 
     try {
-      await submitAnswer(walletAddress, currentIndex, answer.trim());
+      await answerQuestion(walletAddress, selectedQuizId, currentIndex, answer.trim());
       setTxStatus("Answer submitted on-chain!");
 
       // Update score
-      const newScore = await getScore(walletAddress);
+      const newScore = await getScore(walletAddress, selectedQuizId);
       setUserScore(newScore);
 
       // Move to next question if available
       if (currentIndex < totalQuestions - 1) {
         setCurrentIndex(currentIndex + 1);
-        const nextQ = await getQuestion(currentIndex + 1);
-        setCurrentQuestion(typeof nextQ === "string" ? nextQ : "");
+        const nextQ = await getQuestion(selectedQuizId, currentIndex + 1);
+        setCurrentQuestion(nextQ || "");
         setAnswer("");
       } else {
         setTxStatus("You've completed the quiz!");
@@ -198,42 +244,81 @@ export default function ContractUI({ walletAddress, onConnect, isConnecting }: C
     } finally {
       setIsSubmitting(false);
     }
-  }, [walletAddress, answer, currentIndex, totalQuestions]);
+  }, [walletAddress, answer, currentIndex, totalQuestions, selectedQuizId]);
 
-  const handleCheckScore = useCallback(async () => {
-    if (!scoreAddress.trim()) return setError("Enter an address to check");
+  const handleCreateQuiz = useCallback(async () => {
+    if (!walletAddress) return setError("Connect wallet first");
+    
+    const validQuestions = questions.filter(q => q.trim() !== "");
+    const validAnswers = answers.filter(a => a.trim() !== "");
+    
+    if (validQuestions.length === 0) return setError("Add at least one question");
+    if (validQuestions.length !== validAnswers.length) return setError("Questions and answers must match");
+
     setError(null);
-    setIsLoadingScore(true);
-    setScore(null);
+    setIsCreating(true);
+    setTxStatus("Creating quiz on-chain...");
 
     try {
-      const s = await getScore(scoreAddress.trim());
-      setScore(s);
+      const quizId = await createQuiz(walletAddress, validQuestions, validAnswers);
+      setTxStatus(`Quiz created! ID: ${quizId}`);
+      await loadQuizzes();
+      
+      // Reset form
+      setQuestions([""]);
+      setAnswers([""]);
+      
+      setTimeout(() => {
+        setTxStatus(null);
+        setActiveTab("browse");
+      }, 3000);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to fetch score");
+      setError(err instanceof Error ? err.message : "Failed to create quiz");
+      setTxStatus(null);
     } finally {
-      setIsLoadingScore(false);
+      setIsCreating(false);
     }
-  }, [scoreAddress]);
+  }, [walletAddress, questions, answers]);
 
-  const handleCheckMyScore = useCallback(async () => {
-    if (!walletAddress) return;
-    setError(null);
-    setIsLoadingScore(true);
+  const handleAddQuestion = () => {
+    setQuestions([...questions, ""]);
+    setAnswers([...answers, ""]);
+  };
+
+  const handleRemoveQuestion = (index: number) => {
+    if (questions.length <= 1) return;
+    setQuestions(questions.filter((_, i) => i !== index));
+    setAnswers(answers.filter((_, i) => i !== index));
+  };
+
+  const handleQuestionChange = (index: number, value: string) => {
+    const updated = [...questions];
+    updated[index] = value;
+    setQuestions(updated);
+  };
+
+  const handleAnswerChange = (index: number, value: string) => {
+    const updated = [...answers];
+    updated[index] = value;
+    setAnswers(updated);
+  };
+
+  const handleShowLeaderboard = async (quizId: number) => {
     try {
-      const s = await getScore(walletAddress);
-      setScore(s);
-      setScoreAddress(walletAddress);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to fetch score");
-    } finally {
-      setIsLoadingScore(false);
+      const entries = await getLeaderboard(quizId);
+      setLeaderboard(entries);
+      setSelectedQuizId(quizId);
+      setActiveTab("leaderboard");
+    } catch (err) {
+      console.error("Failed to load leaderboard:", err);
     }
-  }, [walletAddress]);
+  };
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode; color: string }[] = [
-    { key: "answer", label: "Answer", icon: <SendIcon />, color: "#7c6cf0" },
-    { key: "score", label: "Check Score", icon: <TrophyIcon />, color: "#fbbf24" },
+    { key: "browse", label: "Browse", icon: <ListIcon />, color: "#7c6cf0" },
+    { key: "answer", label: "Answer", icon: <SendIcon />, color: "#34d399" },
+    { key: "create", label: "Create", icon: <PlusIcon />, color: "#f97316" },
+    { key: "leaderboard", label: "Scores", icon: <TrophyIcon />, color: "#fbbf24" },
   ];
 
   return (
@@ -253,7 +338,7 @@ export default function ContractUI({ walletAddress, onConnect, isConnecting }: C
       {txStatus && (
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-[#34d399]/15 bg-[#34d399]/[0.05] px-4 py-3 backdrop-blur-sm shadow-[0_0_30px_rgba(52,211,153,0.05)] animate-slide-down">
           <span className="text-[#34d399]">
-            {txStatus.includes("on-chain") || txStatus.includes("completed") ? <CheckIcon /> : <SpinnerIcon />}
+            {txStatus.includes("on-chain") || txStatus.includes("created") || txStatus.includes("completed") ? <CheckIcon /> : <SpinnerIcon />}
           </span>
           <span className="text-sm text-[#34d399]/90">{txStatus}</span>
         </div>
@@ -277,24 +362,17 @@ export default function ContractUI({ walletAddress, onConnect, isConnecting }: C
                 <p className="text-[10px] text-white/25 font-mono mt-0.5">{truncate(CONTRACT_ADDRESS)}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {walletAddress && (
-                <Badge variant="success" className="text-[10px]">
-                  Score: {userScore ?? 0}/{totalQuestions}
-                </Badge>
-              )}
-              <Badge variant="info" className="text-[10px]">Soroban</Badge>
-            </div>
+            <Badge variant="info" className="text-[10px]">Soroban</Badge>
           </div>
 
           {/* Tabs */}
-          <div className="flex border-b border-white/[0.06] px-2">
+          <div className="flex border-b border-white/[0.06] px-2 overflow-x-auto">
             {tabs.map((t) => (
               <button
                 key={t.key}
-                onClick={() => { setActiveTab(t.key); setError(null); setScore(null); }}
+                onClick={() => { setActiveTab(t.key); setError(null); }}
                 className={cn(
-                  "relative flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all",
+                  "relative flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-all whitespace-nowrap",
                   activeTab === t.key ? "text-white/90" : "text-white/35 hover:text-white/55"
                 )}
               >
@@ -312,34 +390,105 @@ export default function ContractUI({ walletAddress, onConnect, isConnecting }: C
 
           {/* Tab Content */}
           <div className="p-6">
+            {/* Browse Tab */}
+            {activeTab === "browse" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-white/70">Available Quizzes</h4>
+                  <button onClick={loadQuizzes} className="text-xs text-white/30 hover:text-white/50 transition-colors">
+                    Refresh
+                  </button>
+                </div>
+                
+                {isLoadingQuizzes ? (
+                  <div className="text-center py-8 text-white/30">
+                    <SpinnerIcon />
+                    <p className="mt-2 text-sm">Loading quizzes...</p>
+                  </div>
+                ) : quizzes.length === 0 ? (
+                  <div className="rounded-xl border border-[#fbbf24]/15 bg-[#fbbf24]/[0.03] px-4 py-8 text-center">
+                    <p className="text-sm text-[#fbbf24]/70">No quizzes yet!</p>
+                    <p className="text-xs text-white/30 mt-1">Be the first to create one.</p>
+                    <button
+                      onClick={() => setActiveTab("create")}
+                      className="mt-4 text-xs text-[#7c6cf0]/70 hover:text-[#7c6cf0]"
+                    >
+                      Create a Quiz →
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {quizzes.map((quiz) => (
+                      <div
+                        key={quiz.id}
+                        className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 hover:border-white/[0.12] transition-all"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-mono text-[#7c6cf0]">Quiz #{quiz.id}</span>
+                              <span className="text-xs text-white/30">{quiz.questions.length} questions</span>
+                            </div>
+                            <p className="text-sm text-white/60 mt-1 truncate max-w-[250px]">
+                              {quiz.questions[0] || "No questions"}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleShowLeaderboard(quiz.id)}
+                              className="rounded-lg border border-[#fbbf24]/20 bg-[#fbbf24]/[0.05] px-3 py-1.5 text-xs text-[#fbbf24]/70 hover:bg-[#fbbf24]/10 transition-colors"
+                            >
+                              <TrophyIcon />
+                            </button>
+                            <button
+                              onClick={() => handleSelectQuiz(quiz.id)}
+                              className="rounded-lg bg-[#34d399]/10 border border-[#34d399]/20 px-3 py-1.5 text-xs text-[#34d399]/70 hover:bg-[#34d399]/20 transition-colors"
+                            >
+                              Play
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Answer Tab */}
             {activeTab === "answer" && (
               <div className="space-y-5">
-                <MethodSignature
-                  name="submit_answer"
-                  params="(user: Address, index: u32, answer: String)"
-                  color="#7c6cf0"
-                />
-
-                {totalQuestions === 0 ? (
-                  <div className="rounded-xl border border-[#fbbf24]/15 bg-[#fbbf24]/[0.03] px-4 py-6 text-center">
-                    <p className="text-sm text-[#fbbf24]/70">Quiz not initialized yet.</p>
-                    <p className="text-xs text-white/30 mt-1">The quiz creator needs to initialize it first.</p>
+                {selectedQuizId === null ? (
+                  <div className="rounded-xl border border-[#fbbf24]/15 bg-[#fbbf24]/[0.03] px-4 py-8 text-center">
+                    <p className="text-sm text-[#fbbf24]/70">Select a quiz first</p>
+                    <button
+                      onClick={() => setActiveTab("browse")}
+                      className="mt-2 text-xs text-[#7c6cf0]/70 hover:text-[#7c6cf0]"
+                    >
+                      Browse Quizzes →
+                    </button>
                   </div>
                 ) : (
                   <>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-medium uppercase tracking-wider text-white/25">Quiz</span>
+                        <Badge variant="info">#{selectedQuizId}</Badge>
+                      </div>
+                      {walletAddress && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-white/25">Your Score:</span>
+                          <span className="text-sm font-mono text-[#34d399]">{userScore}/{totalQuestions}</span>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Progress */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-medium uppercase tracking-wider text-white/25">Question</span>
                         <Badge variant="warning">{currentIndex + 1} / {totalQuestions}</Badge>
                       </div>
-                      {walletAddress && userScore !== null && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-white/25">Your Score:</span>
-                          <span className="text-sm font-mono text-[#34d399]">{userScore}</span>
-                        </div>
-                      )}
                     </div>
 
                     {/* Progress bar */}
@@ -363,7 +512,7 @@ export default function ContractUI({ walletAddress, onConnect, isConnecting }: C
                     {/* Answer Input */}
                     <div className="space-y-2">
                       <label className="block text-[11px] font-medium uppercase tracking-wider text-white/30">Your Answer</label>
-                      <div className="group rounded-xl border border-white/[0.06] bg-white/[0.02] p-px transition-all focus-within:border-[#7c6cf0]/30 focus-within:shadow-[0_0_20px_rgba(124,108,240,0.08)]">
+                      <div className="group rounded-xl border border-white/[0.06] bg-white/[0.02] p-px transition-all focus-within:border-[#34d399]/30 focus-within:shadow-[0_0_20px_rgba(52,211,153,0.08)]">
                         <input
                           type="text"
                           value={answer}
@@ -376,7 +525,7 @@ export default function ContractUI({ walletAddress, onConnect, isConnecting }: C
                     </div>
 
                     {walletAddress ? (
-                      <ShimmerButton onClick={handleSubmitAnswer} disabled={isSubmitting} shimmerColor="#7c6cf0" className="w-full">
+                      <ShimmerButton onClick={handleSubmitAnswer} disabled={isSubmitting} shimmerColor="#34d399" className="w-full">
                         {isSubmitting ? (
                           <><SpinnerIcon /> Submitting...</>
                         ) : (
@@ -387,7 +536,7 @@ export default function ContractUI({ walletAddress, onConnect, isConnecting }: C
                       <button
                         onClick={onConnect}
                         disabled={isConnecting}
-                        className="w-full rounded-xl border border-dashed border-[#7c6cf0]/20 bg-[#7c6cf0]/[0.03] py-4 text-sm text-[#7c6cf0]/60 hover:border-[#7c6cf0]/30 hover:text-[#7c6cf0]/80 active:scale-[0.99] transition-all disabled:opacity-50"
+                        className="w-full rounded-xl border border-dashed border-[#34d399]/20 bg-[#34d399]/[0.03] py-4 text-sm text-[#34d399]/60 hover:border-[#34d399]/30 hover:text-[#34d399]/80 active:scale-[0.99] transition-all disabled:opacity-50"
                       >
                         Connect wallet to submit answer
                       </button>
@@ -397,69 +546,135 @@ export default function ContractUI({ walletAddress, onConnect, isConnecting }: C
               </div>
             )}
 
-            {/* Score Tab */}
-            {activeTab === "score" && (
+            {/* Create Quiz Tab */}
+            {activeTab === "create" && (
               <div className="space-y-5">
-                <MethodSignature
-                  name="get_score"
-                  params="(addr: Address)"
-                  returns="-> u32"
-                  color="#fbbf24"
-                />
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-white/70">Create New Quiz</h4>
+                  <Badge variant="warning">Permissionless</Badge>
+                </div>
 
-                {walletAddress && (
+                <p className="text-xs text-white/30">
+                  Anyone can create a quiz. Add your questions and correct answers.
+                </p>
+
+                <div className="space-y-4">
+                  {questions.map((_, index) => (
+                    <div key={index} className="space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-[#f97316]/70">Question {index + 1}</span>
+                        {questions.length > 1 && (
+                          <button
+                            onClick={() => handleRemoveQuestion(index)}
+                            className="text-xs text-white/30 hover:text-[#f87171]/70"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={questions[index]}
+                        onChange={(e) => handleQuestionChange(index, e.target.value)}
+                        placeholder="Enter question..."
+                        className="w-full rounded-lg bg-white/[0.03] px-3 py-2 text-sm text-white/90 placeholder:text-white/20 outline-none border border-white/[0.04] focus:border-[#f97316]/30"
+                      />
+                      <input
+                        type="text"
+                        value={answers[index]}
+                        onChange={(e) => handleAnswerChange(index, e.target.value)}
+                        placeholder="Correct answer..."
+                        className="w-full rounded-lg bg-white/[0.03] px-3 py-2 text-sm text-[#34d399]/90 placeholder:text-white/20 outline-none border border-white/[0.04] focus:border-[#34d399]/30 font-mono"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  onClick={handleAddQuestion}
+                  className="w-full rounded-xl border border-dashed border-[#7c6cf0]/20 bg-[#7c6cf0]/[0.03] py-3 text-sm text-[#7c6cf0]/60 hover:border-[#7c6cf0]/30 hover:text-[#7c6cf0]/80 transition-all"
+                >
+                  <PlusIcon /> Add Question
+                </button>
+
+                {walletAddress ? (
+                  <ShimmerButton onClick={handleCreateQuiz} disabled={isCreating} shimmerColor="#f97316" className="w-full">
+                    {isCreating ? (
+                      <><SpinnerIcon /> Creating...</>
+                    ) : (
+                      <><PlusIcon /> Create Quiz</>
+                    )}
+                  </ShimmerButton>
+                ) : (
                   <button
-                    onClick={handleCheckMyScore}
-                    disabled={isLoadingScore}
-                    className="w-full rounded-xl border border-[#34d399]/15 bg-[#34d399]/[0.03] py-3 text-sm text-[#34d399]/70 hover:border-[#34d399]/25 hover:text-[#34d399]/90 active:scale-[0.99] transition-all disabled:opacity-50"
+                    onClick={onConnect}
+                    disabled={isConnecting}
+                    className="w-full rounded-xl border border-dashed border-[#f97316]/20 bg-[#f97316]/[0.03] py-4 text-sm text-[#f97316]/60 hover:border-[#f97316]/30 hover:text-[#f97316]/80 active:scale-[0.99] transition-all disabled:opacity-50"
                   >
-                    Check My Score ({truncate(walletAddress)})
+                    Connect wallet to create quiz
                   </button>
                 )}
+              </div>
+            )}
 
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-white/[0.06]" />
-                  </div>
-                  <div className="relative flex justify-center">
-                    <span className="bg-[#050510] px-3 text-[10px] text-white/20">OR</span>
-                  </div>
+            {/* Leaderboard Tab */}
+            {activeTab === "leaderboard" && (
+              <div className="space-y-5">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-white/70">Leaderboard</h4>
+                  {selectedQuizId !== null && (
+                    <Badge variant="info">Quiz #{selectedQuizId}</Badge>
+                  )}
                 </div>
 
-                <div className="space-y-3">
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-white/30">Address to Check</label>
-                  <div className="group rounded-xl border border-white/[0.06] bg-white/[0.02] p-px transition-all focus-within:border-[#fbbf24]/30 focus-within:shadow-[0_0_20px_rgba(251,191,36,0.08)]">
-                    <input
-                      type="text"
-                      value={scoreAddress}
-                      onChange={(e) => setScoreAddress(e.target.value)}
-                      placeholder="G... address"
-                      className="w-full rounded-[11px] bg-transparent px-4 py-3 font-mono text-sm text-white/90 placeholder:text-white/15 outline-none"
-                    />
+                {selectedQuizId === null && quizzes.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {quizzes.map((quiz) => (
+                      <button
+                        key={quiz.id}
+                        onClick={() => handleShowLeaderboard(quiz.id)}
+                        className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-1.5 text-xs text-white/50 hover:text-white/70 hover:border-white/[0.12] transition-all"
+                      >
+                        Quiz #{quiz.id}
+                      </button>
+                    ))}
                   </div>
-                </div>
+                )}
 
-                <ShimmerButton onClick={handleCheckScore} disabled={isLoadingScore} shimmerColor="#fbbf24" className="w-full">
-                  {isLoadingScore ? <><SpinnerIcon /> Fetching...</> : <><TrophyIcon /> Check Score</>}
-                </ShimmerButton>
-
-                {score !== null && (
-                  <div className="rounded-xl border border-[#fbbf24]/15 bg-[#fbbf24]/[0.03] p-6 text-center animate-fade-in-up">
-                    <div className="flex items-center justify-center gap-2 mb-2">
-                      <span className="text-[#fbbf24]"><TrophyIcon /></span>
-                      <span className="text-[10px] font-medium uppercase tracking-wider text-white/25">Score</span>
-                    </div>
-                    <p className="text-4xl font-bold font-mono text-white/90">
-                      {score} <span className="text-lg text-white/30">/ {totalQuestions}</span>
-                    </p>
-                    {totalQuestions > 0 && (
-                      <div className="mt-3 h-2 rounded-full bg-white/[0.05] overflow-hidden max-w-[200px] mx-auto">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-[#fbbf24] to-[#34d399] transition-all duration-500"
-                          style={{ width: `${(score / totalQuestions) * 100}%` }}
-                        />
+                {leaderboard.length === 0 ? (
+                  <div className="rounded-xl border border-[#fbbf24]/15 bg-[#fbbf24]/[0.03] px-4 py-8 text-center">
+                    <p className="text-sm text-[#fbbf24]/70">No scores yet!</p>
+                    <p className="text-xs text-white/30 mt-1">Be the first to answer questions.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {leaderboard.map((entry, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={cn(
+                            "flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold",
+                            index === 0 ? "bg-[#fbbf24]/20 text-[#fbbf24]" :
+                            index === 1 ? "bg-white/10 text-white/60" :
+                            index === 2 ? "bg-[#f97316]/10 text-[#f97316]" :
+                            "bg-white/5 text-white/30"
+                          )}>
+                            {index + 1}
+                          </span>
+                          <span className="text-sm font-mono text-white/70">
+                            {truncate(entry.user)}
+                          </span>
+                          {walletAddress && entry.user === walletAddress && (
+                            <Badge variant="success" className="text-[8px]">You</Badge>
+                          )}
+                        </div>
+                        <span className="text-lg font-bold font-mono text-[#fbbf24]">
+                          {entry.score}
+                        </span>
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>

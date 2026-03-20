@@ -26,7 +26,7 @@ import {
 
 /** Your deployed Soroban contract ID */
 export const CONTRACT_ADDRESS =
-  "CDRNXZVLLQNFHYW5EDCYBVRRRC4VVBGNXZA6OFF6B6IFHPE2QRMPAXJM";
+  "CBJE3UL6AKAIMWM5BKOFNREF7NTBL7ABX2D2Q74YPXNMUYOXAZBP276X";
 
 /** Network passphrase (testnet by default) */
 export const NETWORK_PASSPHRASE = Networks.TESTNET;
@@ -95,12 +95,6 @@ export async function getWalletAddress(): Promise<string | null> {
 
 /**
  * Build, simulate, and optionally sign + submit a Soroban contract call.
- *
- * @param method   - The contract method name to invoke
- * @param params   - Array of xdr.ScVal parameters for the method
- * @param caller   - The public key (G...) of the calling account
- * @param sign     - If true, signs via Freighter and submits. If false, only simulates.
- * @returns        The result of the simulation or submission
  */
 export async function callContract(
   method: string,
@@ -128,14 +122,11 @@ export async function callContract(
   }
 
   if (!sign) {
-    // Read-only call — just return the simulation result
     return simulated;
   }
 
-  // Prepare the transaction with the simulation result
   const prepared = rpc.assembleTransaction(tx, simulated).build();
 
-  // Sign with Freighter
   const { signedTxXdr } = await signTransaction(prepared.toXDR(), {
     networkPassphrase: NETWORK_PASSPHRASE,
   });
@@ -151,7 +142,6 @@ export async function callContract(
     throw new Error(`Transaction submission failed: ${result.status}`);
   }
 
-  // Poll for confirmation
   let getResult = await server.getTransaction(result.hash);
   while (getResult.status === "NOT_FOUND") {
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -174,7 +164,7 @@ export async function readContract(
   caller?: string
 ) {
   const account =
-    caller || Keypair.random().publicKey(); // Use a random keypair for read-only
+    caller || Keypair.random().publicKey();
   const sim = await callContract(method, params, account, false);
   if (
     rpc.Api.isSimulationSuccess(sim as rpc.Api.SimulateTransactionResponse) &&
@@ -216,41 +206,53 @@ export function toScValBool(value: boolean): xdr.ScVal {
 // ============================================================
 
 /**
- * Initialize the quiz with questions and answers.
- * Calls: init(questions: Vec<String>, answers: Vec<String>)
+ * Create a new quiz. Anyone can create quizzes - fully permissionless.
+ * Returns the unique quiz ID.
  */
-export async function initQuiz(
+export async function createQuiz(
   caller: string,
   questions: string[],
   answers: string[]
-) {
+): Promise<number> {
   const questionVals = questions.map((q) => toScValString(q));
   const answerVals = answers.map((a) => toScValString(a));
 
-  return callContract(
-    "init",
+  const result = await callContract(
+    "create_quiz",
     [
+      toScValAddress(caller),
       nativeToScVal(questionVals, { type: "vec<string>" }),
       nativeToScVal(answerVals, { type: "vec<string>" }),
     ],
     caller,
     true
   );
+  
+  // Parse the result to get the quiz ID
+  if (result) {
+    const getResult = result as rpc.Api.GetSuccessfulTransactionResponse;
+    if (getResult.returnValue) {
+      return scValToNative(getResult.returnValue) as number;
+    }
+  }
+  return 0;
 }
 
 /**
- * Submit an answer to a quiz question.
- * Calls: submit_answer(user: Address, question_index: u32, answer: String)
+ * Answer a question in a quiz. Requires auth from the user.
+ * Permissionless - anyone can answer any question in any quiz.
  */
-export async function submitAnswer(
+export async function answerQuestion(
   caller: string,
+  quizId: number,
   questionIndex: number,
   answer: string
 ) {
   return callContract(
-    "submit_answer",
+    "answer_question",
     [
       toScValAddress(caller),
+      toScValU32(quizId),
       toScValU32(questionIndex),
       toScValString(answer),
     ],
@@ -260,41 +262,90 @@ export async function submitAnswer(
 }
 
 /**
- * Get the score for a wallet address.
- * Calls: get_score(addr: Address) -> u32
+ * Get the score for a user on a specific quiz.
  */
-export async function getScore(address: string, caller?: string) {
+export async function getScore(address: string, quizId: number, caller?: string): Promise<number> {
   const result = await readContract(
     "get_score",
-    [toScValAddress(address)],
+    [toScValAddress(address), toScValU32(quizId)],
     caller
   );
   return result !== null ? Number(result) : 0;
 }
 
 /**
- * Get a question by its index.
- * Calls: get_question(index: u32) -> String
+ * Get a question by index from a specific quiz.
  */
-export async function getQuestion(index: number, caller?: string) {
-  return readContract(
+export async function getQuestion(quizId: number, index: number, caller?: string): Promise<string | null> {
+  const result = await readContract(
     "get_question",
-    [toScValU32(index)],
+    [toScValU32(quizId), toScValU32(index)],
     caller
   );
+  return result !== null ? String(result) : null;
 }
 
 /**
- * Get the total number of questions.
- * Calls: get_total_questions() -> u32
+ * Get the total number of questions in a quiz.
  */
-export async function getTotalQuestions(caller?: string) {
+export async function getTotalQuestions(quizId: number, caller?: string): Promise<number> {
   const result = await readContract(
     "get_total_questions",
+    [toScValU32(quizId)],
+    caller
+  );
+  return result !== null ? Number(result) : 0;
+}
+
+/**
+ * Get all quiz IDs created on this contract.
+ */
+export async function getAllQuizIds(caller?: string): Promise<number[]> {
+  const result = await readContract(
+    "get_all_quiz_ids",
     [],
     caller
   );
-  return result !== null ? Number(result) : 0;
+  if (result && Array.isArray(result)) {
+    return result.map((v: unknown) => Number(v));
+  }
+  return [];
+}
+
+/**
+ * Get all questions for a quiz.
+ */
+export async function getQuizQuestions(quizId: number, caller?: string): Promise<string[]> {
+  const result = await readContract(
+    "get_quiz_questions",
+    [toScValU32(quizId)],
+    caller
+  );
+  if (result && Array.isArray(result)) {
+    return result.map((v: unknown) => String(v));
+  }
+  return [];
+}
+
+/**
+ * Get leaderboard for a quiz.
+ */
+export async function getLeaderboard(quizId: number, caller?: string): Promise<Array<{ user: string; score: number }>> {
+  const result = await readContract(
+    "get_leaderboard",
+    [toScValU32(quizId)],
+    caller
+  );
+  if (result && Array.isArray(result)) {
+    return result.map((entry: unknown) => {
+      const e = entry as { user: string; score: number };
+      return {
+        user: e.user,
+        score: Number(e.score),
+      };
+    });
+  }
+  return [];
 }
 
 export { nativeToScVal, scValToNative, Address, xdr };
