@@ -53,55 +53,7 @@ Language: Rust (contracts), JavaScript
 
 👉 Contract Address: CDRNXZVLLQNFHYW5EDCYBVRRRC4VVBGNXZA6OFF6B6IFHPE2QRMPAXJM
 
-⚙️ How It Works
 
-Quiz creator adds questions and correct answers
-
-Smart contract stores the correct answers securely
-
-Users connect their Stellar wallet
-
-Users submit answers through the dApp
-
-Smart contract verifies the answers
-
-Rewards are automatically distributed to winners
-
-▶️ Getting Started
-1. Clone the repository
-git clone https://github.com/sachinnit25/DecentralizedQuizApp.git
-cd DecentralizedQuizApp
-2. Install dependencies
-npm install
-3. Run the app
-npm start
-🧪 Future Improvements
-
-🏆 Leaderboard system
-
-🎯 Timed quizzes
-
-🎁 Token / NFT rewards
-
-🌐 IPFS integration for decentralized storage
-
-📱 Mobile-friendly UI
-
-🤝 Contributing
-
-Contributions are welcome!
-
-Fork the repository
-
-Create a new branch
-
-Commit your changes
-
-Open a pull request
-
-📜 License
-
-This project is licensed under the MIT License.
 
 <img width="1680" height="1050" alt="Screenshot 2026-03-20 at 3 03 43 PM" src="https://github.com/user-attachments/assets/00265e98-f43c-49d8-9120-5b72f8eb45ff" />
 
